@@ -1,4 +1,6 @@
 import { mapSchema, getDirective, MapperKind } from '@graphql-tools/utils';
+import jwt from 'jsonwebtoken'
+import {intersection} from "lodash";
 
 export const authDirective = (directiveName, getUserFn) => {
   const typeDirectiveArgumentMaps = {};
@@ -8,7 +10,6 @@ export const authDirective = (directiveName, getUserFn) => {
       mapSchema(schema, {
         [MapperKind.TYPE]: (type) => {
           const authDirective = getDirective(schema, type, directiveName)?.[0];
-
           if (authDirective) {
             typeDirectiveArgumentMaps[type.name] = authDirective;
           }
@@ -19,19 +20,18 @@ export const authDirective = (directiveName, getUserFn) => {
           const authDirective =
             getDirective(schema, fieldConfig, directiveName)?.[0] ??
             typeDirectiveArgumentMaps[typeName];
-
           if (authDirective) {
             const { requires } = authDirective;
 
             if (requires) {
-              const { resolve = defaultFieldResolver } = fieldConfig;
+              const { resolve } = fieldConfig;
 
               fieldConfig.resolve = function (source, args, context, info) {
-                const user = getUserFn(context.authToken);
-
-                if (!user.hasRole(requires)) {
+                const user = getUserFn(context.authToken, requires);
+                if (!user) {
                   throw new Error('not authorized');
                 }
+                console.log(user)
 
                 return resolve(source, args, context, info);
               };
@@ -44,13 +44,18 @@ export const authDirective = (directiveName, getUserFn) => {
   };
 };
 
-export const getUser = (token) => {
-  const roles = ['UNKNOWN', 'USER', 'REVIEWER', 'ADMIN'];
-  return {
-    hasRole: (role) => {
-      const tokenIndex = roles.indexOf(token);
-      const roleIndex = roles.indexOf(role);
-      return roleIndex >= 0 && tokenIndex >= roleIndex;
-    },
-  };
+export const getUser = (token, requiredRoles) => {
+
+  const [bearer, jwtToken] = token.split(' ')
+  console.log(jwtToken, requiredRoles)
+  const jwtData = jwt.verify(jwtToken, process.env.JWT_SECRET)
+  if (jwtData) {
+    return !!intersection(jwtData.roles, requiredRoles)
+  }
 };
+
+export const getUserFromJWT = (token) => {
+  const [bearer, jwtToken] = token.split(' ')
+  const jwtData = jwt.verify(jwtToken, process.env.JWT_SECRET)
+  return jwtData
+}
